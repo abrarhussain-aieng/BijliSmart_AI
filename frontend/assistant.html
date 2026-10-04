@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BijliSmartAI</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="assistant.html" data-title="AI Assistant" data-sub="Ask about your bills, tariffs and ways to save">
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="content">
+      <div class="card chat">
+        <div class="messages" id="messages"></div>
+        <div class="composer">
+          <input id="q" placeholder="Ask about your bill..." maxlength="1000" autocomplete="off">
+          <button class="btn" id="send" type="button" aria-label="Send">Send</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/app.js"></script>
+<script src="js/assistant.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BijliSmartAI</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="bills.html" data-title="Bills" data-sub="Upload a bill and review the extracted details">
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="content">
+      <div class="card">
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Upload electricity bill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <div><b>Drop your bill here or click to upload</b></div>
+          <div class="sub">PNG, JPG, JPEG, WEBP or PDF · up to 8 MB</div>
+        </div>
+        <input type="file" id="file" accept=".png,.jpg,.jpeg,.webp,.pdf" hidden>
+        <div id="status"></div>
+      </div>
+      <div class="grid two-b" style="margin-top:18px">
+        <div class="card"><h2>Your bills</h2><div id="bill-list"></div></div>
+        <div class="card"><h2>Bill details</h2><div id="bill-detail"><div class="empty">Select a bill to see its breakdown.</div></div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/app.js"></script>
+<script src="js/bills.js"></script>
+</body>
+</html>
