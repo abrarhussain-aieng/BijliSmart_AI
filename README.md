@@ -6,7 +6,7 @@ AI-powered electricity bill intelligence for Pakistani consumers. Upload a bill 
 Electricity bills are hard to read, bills spike without clear reasons, and generic advice does not reflect a household's real data.
 
 ## Solution
-BijliWise AI extracts the bill with Mistral OCR, validates it, stores monthly history, compares months, estimates appliance consumption from user-entered wattage and hours, retrieves tariff knowledge with RAG, and answers questions through a LangGraph agent that only uses the user's own data.
+BijliSmart AI extracts the bill with Mistral OCR, validates it, stores monthly history, compares months, estimates appliance consumption from user-entered wattage and hours, retrieves tariff knowledge with RAG, and answers questions through a LangGraph agent that only uses the user's own data.
 
 ## Features
 - Bill upload (PNG, JPG, JPEG, WEBP, PDF) with OCR extraction and numeric validation
