@@ -2,6 +2,7 @@
 import io
 import json
 import logging
+import os
 import re
 
 import numpy as np
@@ -11,6 +12,12 @@ from app.core.config import settings
 from app.utils.validators import AIServiceError
 
 logger = logging.getLogger(__name__)
+
+GEMINI_VISION_FALLBACK_MODELS = (
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+)
 
 
 class LLMRouterService:
@@ -221,42 +228,76 @@ class LLMRouterService:
         return "\n\n".join(extracted_pages).strip()
 
     def _ocr_with_gemini_vision(self, content: bytes, mime: str) -> str:
-        """Extract bill text via Gemini Vision API without consuming server RAM."""
+        """Extract bill text via Gemini Vision API with multi-model fallback and zero server RAM spike."""
         if not self.gemini_client:
             return ""
         from google.genai import types
 
-        response = self.gemini_client.models.generate_content(
-            model=settings.gemini_model,
-            contents=[
-                types.Part.from_bytes(data=content, mime_type=mime),
-                (
-                    "Extract all text from this electricity bill exactly as printed. "
-                    "Preserve table rows and columns, and include every number, label, "
-                    "tariff slab, and field visible."
-                ),
-            ],
+        if mime != "application/pdf":
+            img = Image.open(io.BytesIO(content)).convert("RGB")
+            img.thumbnail((1600, 1600))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            content = buf.getvalue()
+            mime = "image/jpeg"
+
+        prompt = (
+            "Extract all text from this electricity bill exactly as printed. "
+            "Preserve table rows and columns, and include every number, label, "
+            "tariff slab, and field visible."
         )
-        return (response.text or "").strip()
+
+        models_to_try = list(
+            dict.fromkeys([settings.gemini_model, *GEMINI_VISION_FALLBACK_MODELS])
+        )
+        last_exc: Exception | None = None
+
+        for model_name in models_to_try:
+            try:
+                response = self.gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        types.Part.from_bytes(data=content, mime_type=mime),
+                        prompt,
+                    ],
+                )
+                text = (response.text or "").strip()
+                if text:
+                    return text
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Gemini Vision OCR failed on '%s', trying next model: %s",
+                    model_name,
+                    exc,
+                )
+
+        if last_exc:
+            raise last_exc
+        return ""
 
     def ocr(self, content: bytes, mime: str) -> str:
-        """Use Gemini Vision first (fast, zero server RAM) with RapidOCR as local fallback."""
-        if settings.ocr_use_gemini_vision_fallback and self.gemini_client:
+        """Use Gemini Vision multi-model chain first; only run RapidOCR if ENABLE_LOCAL_OCR=true."""
+        if self.gemini_client:
             try:
                 vision_text = self._ocr_with_gemini_vision(content, mime)
                 if len(vision_text.strip()) >= 20:
                     return vision_text
             except Exception as exc:
-                logger.warning("Gemini Vision OCR failed (%s); falling back to RapidOCR", exc)
+                logger.error("All Gemini Vision models failed for OCR: %s", exc)
 
-        try:
-            text = self._ocr_with_rapidocr(content, mime)
-            if text:
-                return text
-        except Exception as exc:
-            logger.warning("RapidOCR failed: %s", exc)
+        if os.getenv("ENABLE_LOCAL_OCR", "false").lower() == "true":
+            try:
+                text = self._ocr_with_rapidocr(content, mime)
+                if text:
+                    return text
+            except Exception as exc:
+                logger.warning("RapidOCR failed: %s", exc)
 
-        raise AIServiceError("Reading the bill failed with the configured OCR engines.")
+        raise AIServiceError(
+            "Bill OCR service is temporarily busy. Please try again in a few seconds.",
+            503,
+        )
 
 
 # Keep both names so existing imports (`from app.ai.mistral import mistral_service`) keep working
