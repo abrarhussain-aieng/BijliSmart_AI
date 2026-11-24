@@ -1,9 +1,11 @@
-"""Multi-provider LLM router (Groq -> Cerebras -> Gemini) and OCR service."""
+"""Multi-provider LLM router (Groq -> Cerebras -> Gemini) and cloud-first OCR service."""
+import base64
 import io
 import json
 import logging
 import os
 import re
+import time
 
 import numpy as np
 from PIL import Image
@@ -14,10 +16,12 @@ from app.utils.validators import AIServiceError
 logger = logging.getLogger(__name__)
 
 GEMINI_VISION_FALLBACK_MODELS = (
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-4-hydrogen",
 )
+GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 
 class LLMRouterService:
@@ -184,6 +188,17 @@ class LLMRouterService:
                 "The AI service returned an unreadable response."
             ) from exc
 
+    @staticmethod
+    def _prepare_image_bytes(content: bytes, mime: str) -> tuple[bytes, str]:
+        """Downscale raster bill images to 1600px JPEG for fast, low-RAM vision API calls."""
+        if mime == "application/pdf":
+            return content, mime
+        img = Image.open(io.BytesIO(content)).convert("RGB")
+        img.thumbnail((1600, 1600))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        return buf.getvalue(), "image/jpeg"
+
     def _ocr_with_rapidocr(self, content: bytes, mime: str) -> str:
         """Extract text locally using RapidOCR + pypdfium2 with row/column layout preservation."""
         images: list[Image.Image] = []
@@ -228,18 +243,10 @@ class LLMRouterService:
         return "\n\n".join(extracted_pages).strip()
 
     def _ocr_with_gemini_vision(self, content: bytes, mime: str) -> str:
-        """Extract bill text via Gemini Vision API with multi-model fallback and zero server RAM spike."""
+        """Extract bill text via Gemini Vision with retry backoff and active Gemini 3/4 fallback models."""
         if not self.gemini_client:
             return ""
         from google.genai import types
-
-        if mime != "application/pdf":
-            img = Image.open(io.BytesIO(content)).convert("RGB")
-            img.thumbnail((1600, 1600))
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=85)
-            content = buf.getvalue()
-            mime = "image/jpeg"
 
         prompt = (
             "Extract all text from this electricity bill exactly as printed. "
@@ -253,38 +260,86 @@ class LLMRouterService:
         last_exc: Exception | None = None
 
         for model_name in models_to_try:
-            try:
-                response = self.gemini_client.models.generate_content(
-                    model=model_name,
-                    contents=[
-                        types.Part.from_bytes(data=content, mime_type=mime),
-                        prompt,
-                    ],
-                )
-                text = (response.text or "").strip()
-                if text:
-                    return text
-            except Exception as exc:
-                last_exc = exc
-                logger.warning(
-                    "Gemini Vision OCR failed on '%s', trying next model: %s",
-                    model_name,
-                    exc,
-                )
+            for attempt in range(2):
+                try:
+                    response = self.gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=[
+                            types.Part.from_bytes(data=content, mime_type=mime),
+                            prompt,
+                        ],
+                    )
+                    text = (response.text or "").strip()
+                    if text:
+                        return text
+                except Exception as exc:
+                    last_exc = exc
+                    err_str = str(exc)
+                    is_transient = "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str
+                    logger.warning(
+                        "Gemini Vision OCR failed on '%s' (attempt %d): %s",
+                        model_name,
+                        attempt + 1,
+                        exc,
+                    )
+                    if is_transient and attempt == 0:
+                        time.sleep(1.5)
+                        continue
+                    break
 
         if last_exc:
             raise last_exc
         return ""
 
+    def _ocr_with_groq_vision(self, content: bytes, mime: str) -> str:
+        """Secondary cloud Vision OCR fallback using Groq multimodal model if Gemini is busy."""
+        if not self.groq_client or mime == "application/pdf":
+            return ""
+        b64 = base64.b64encode(content).decode("ascii")
+        response = self.groq_client.chat.completions.create(
+            model=GROQ_VISION_MODEL,
+            temperature=0.0,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Extract all text from this electricity bill exactly as printed. "
+                                "Preserve table rows and columns, and include every number, label, "
+                                "tariff slab, and field visible."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{b64}"},
+                        },
+                    ],
+                }
+            ],
+        )
+        return (response.choices[0].message.content or "").strip()
+
     def ocr(self, content: bytes, mime: str) -> str:
-        """Use Gemini Vision multi-model chain first; only run RapidOCR if ENABLE_LOCAL_OCR=true."""
+        """Cloud-first OCR: Gemini Vision (3.8-flash -> 3.5-flash-lite -> 3.1-flash-lite) -> Groq Vision."""
+        prepared_content, prepared_mime = self._prepare_image_bytes(content, mime)
+
         if self.gemini_client:
             try:
-                vision_text = self._ocr_with_gemini_vision(content, mime)
+                vision_text = self._ocr_with_gemini_vision(prepared_content, prepared_mime)
                 if len(vision_text.strip()) >= 20:
                     return vision_text
             except Exception as exc:
-                logger.error("All Gemini Vision models failed for OCR: %s", exc)
+                logger.warning("Gemini Vision chain failed, trying Groq Vision: %s", exc)
+
+        if self.groq_client and prepared_mime != "application/pdf":
+            try:
+                groq_text = self._ocr_with_groq_vision(prepared_content, prepared_mime)
+                if len(groq_text.strip()) >= 20:
+                    return groq_text
+            except Exception as exc:
+                logger.warning("Groq Vision OCR fallback failed: %s", exc)
 
         if os.getenv("ENABLE_LOCAL_OCR", "false").lower() == "true":
             try:
