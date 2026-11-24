@@ -1,4 +1,4 @@
-"""Multi-provider LLM router (Groq -> Cerebras -> Gemini) and free local OCR service."""
+"""Multi-provider LLM router (Groq -> Cerebras -> Gemini) and OCR service."""
 import io
 import json
 import logging
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMRouterService:
-    """Routes chat completions through Groq -> Cerebras -> Gemini and extracts text via RapidOCR."""
+    """Routes chat completions through Groq -> Cerebras -> Gemini and extracts bill text."""
 
     def __init__(self) -> None:
         self._groq_client = None
@@ -198,7 +198,6 @@ class LLMRouterService:
             if not result:
                 continue
 
-            # Sort bounding boxes top-to-bottom (15px row tolerance), then left-to-right
             boxes: list[tuple[float, float, str]] = []
             for item in result:
                 if len(item) >= 2 and item[1]:
@@ -222,7 +221,7 @@ class LLMRouterService:
         return "\n\n".join(extracted_pages).strip()
 
     def _ocr_with_gemini_vision(self, content: bytes, mime: str) -> str:
-        """Gemini Vision backup if local RapidOCR cannot read a blurry/skewed bill."""
+        """Extract bill text via Gemini Vision API without consuming server RAM."""
         if not self.gemini_client:
             return ""
         from google.genai import types
@@ -233,33 +232,31 @@ class LLMRouterService:
                 types.Part.from_bytes(data=content, mime_type=mime),
                 (
                     "Extract all text from this electricity bill exactly as printed. "
-                    "Include every number, label, tariff slab, and field visible."
+                    "Preserve table rows and columns, and include every number, label, "
+                    "tariff slab, and field visible."
                 ),
             ],
         )
         return (response.text or "").strip()
 
     def ocr(self, content: bytes, mime: str) -> str:
-        """Extract bill text using free RapidOCR first, with optional Gemini Vision backup."""
-        text = ""
+        """Use Gemini Vision first (fast, zero server RAM) with RapidOCR as local fallback."""
+        if settings.ocr_use_gemini_vision_fallback and self.gemini_client:
+            try:
+                vision_text = self._ocr_with_gemini_vision(content, mime)
+                if len(vision_text.strip()) >= 20:
+                    return vision_text
+            except Exception as exc:
+                logger.warning("Gemini Vision OCR failed (%s); falling back to RapidOCR", exc)
+
         try:
             text = self._ocr_with_rapidocr(content, mime)
+            if text:
+                return text
         except Exception as exc:
-            logger.warning("RapidOCR failed (%s); checking Gemini Vision fallback", exc)
+            logger.warning("RapidOCR failed: %s", exc)
 
-        if len(text.strip()) < 20 and settings.ocr_use_gemini_vision_fallback:
-            try:
-                logger.info("RapidOCR returned sparse text; trying Gemini Vision fallback")
-                vision_text = self._ocr_with_gemini_vision(content, mime)
-                if len(vision_text.strip()) > len(text.strip()):
-                    text = vision_text
-            except Exception as exc:
-                logger.warning("Gemini Vision OCR fallback failed: %s", exc)
-
-        if not text:
-            raise AIServiceError("Reading the bill failed with the configured OCR engines.")
-
-        return text
+        raise AIServiceError("Reading the bill failed with the configured OCR engines.")
 
 
 # Keep both names so existing imports (`from app.ai.mistral import mistral_service`) keep working
