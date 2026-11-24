@@ -13,14 +13,22 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    mistral_api_key: str = ""
+    # LLM Provider API Keys (Fallback order: Groq -> Cerebras -> Gemini)
+    groq_api_key: str = ""
+    cerebras_api_key: str = ""
+    gemini_api_key: str = ""
+
     database_url: str = ""
     chroma_persist_directory: str = ""
 
-    # Model names are configurable so they can change without code changes.
-    mistral_chat_model: str = "mistral-small-latest"
-    mistral_embedding_model: str = "mistral-embed"
-    mistral_ocr_model: str = "mistral-ocr-latest"
+    # Configurable model names (automatically read GROQ_MODEL, CEREBRAS_MODEL, GEMINI_MODEL)
+    groq_model: str = "openai/gpt-oss-120b"
+    cerebras_model: str = "gpt-oss-120b"
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_embedding_model: str = "gemini-embedding-001"
+
+    # Free OCR setting (RapidOCR primary + Gemini Vision backup if scan is unclear)
+    ocr_use_gemini_vision_fallback: bool = True
 
     max_upload_mb: int = 8
     knowledge_base_dir: str = str(BASE_DIR / "data" / "knowledge_base")

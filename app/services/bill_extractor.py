@@ -1,7 +1,7 @@
 """Replaceable bill extraction layer: file -> structured JSON."""
 from abc import ABC, abstractmethod
 
-from app.ai.mistral import mistral_service
+from app.ai.mistral import llm_service
 from app.ai.prompts import EXTRACTION_PROMPT
 from app.utils.validators import AIServiceError, BillValidationError
 
@@ -14,14 +14,14 @@ class BillExtractor(ABC):
         """Return raw (unvalidated) bill fields as a dict."""
 
 
-class MistralBillExtractor(BillExtractor):
-    """Mistral OCR for text extraction, then a Mistral chat model for structuring."""
+class FreeOCRBillExtractor(BillExtractor):
+    """Free RapidOCR (+ Gemini Vision backup) for text extraction, then Groq -> Cerebras -> Gemini for JSON structuring."""
 
     def extract(self, content: bytes, mime: str) -> dict:
-        text = mistral_service.ocr(content, mime)
+        text = llm_service.ocr(content, mime)
         if len(text.strip()) < 20:
             raise BillValidationError("Could not read any text from this file. Upload a clearer image or PDF.")
-        raw = mistral_service.chat_json(
+        raw = llm_service.chat_json(
             [{"role": "system", "content": EXTRACTION_PROMPT}, {"role": "user", "content": text[:12000]}]
         )
         if not isinstance(raw, dict):
@@ -33,4 +33,4 @@ class MistralBillExtractor(BillExtractor):
 
 def get_bill_extractor() -> BillExtractor:
     """Factory used by the workflow; change the return value to use another provider."""
-    return MistralBillExtractor()
+    return FreeOCRBillExtractor()
