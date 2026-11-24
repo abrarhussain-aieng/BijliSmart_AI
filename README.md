@@ -1,6 +1,6 @@
 # ⚡ BijliSmart AI — Intelligent Electricity Bill Analyzer & Energy Assistant
 
-**BijliSmart AI** is a full-stack Agentic AI web application built to help households—especially across Pakistani DISCO billing slabs—extract, validate, track, and reduce their monthly electricity consumption without relying on expensive paid AI APIs.
+**BijliSmart AI** is a full-stack Agentic AI web application built to help households—especially across Pakistani DISCO billing slabs—extract, validate, track, and reduce their monthly electricity consumption without relying on paid AI APIs.
 
 🔗 **Live Demo:** [https://bijlismart-ai.onrender.com](https://bijlismart-ai.onrender.com)
 
@@ -10,7 +10,7 @@
 
 - **Automated Bill Scanning & Deterministic Validation:** Upload electricity bills (`PNG`, `JPG`, `WEBP`, or `PDF`). Extracted readings, units, taxes, FPA, GST, and payable amounts pass through strict invariant checks (`validators.py`) to catch OCR anomalies, swapped readings, or negative values before persistence.
 - **Multi-Provider LLM Fallback Router:** Zero single-point-of-failure inference routing across **Groq → Cerebras → Google Gemini** with automatic JSON repair and `<think>` tag stripping.
-- **Resilient Cloud-First Vision OCR:** Multi-model vision extraction (**Gemini `3.8-flash` → `3.5-flash-lite` → `3.1-flash-lite`** with exponential retry backoff + **Groq Vision** fallback) engineered to run smoothly within a **512 MB RAM** cloud container, with optional local **RapidOCR** (`onnxruntime`) support for offline environments.
+- **Resilient Cloud-First Vision OCR:** Multi-model vision extraction (**Gemini `3.8-flash` → `3.5-flash-lite` → `3.1-flash-lite` → `4-hydrogen`** with exponential retry backoff + **Groq Vision** fallback) engineered to run smoothly within a **512 MB RAM** cloud container, with optional local **RapidOCR** (`onnxruntime`) support for offline environments.
 - **Agentic RAG Energy Assistant:** Powered by **LangGraph**, **ChromaDB**, and **Google `gemini-embedding-001`**, combining live user bill history, appliance wattage calculators, and Pakistani tariff knowledge to deliver grounded, hallucination-free savings recommendations.
 - **Appliance Load & History Analytics:** Interactive dashboard tracking month-over-month kWh trends, effective per-unit rates (`Rs./kWh`), and appliance-level consumption breakdowns.
 
